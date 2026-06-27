@@ -321,7 +321,7 @@ export default function App() {
         }
       }
 
-      const response = await fetch('/api/generate-mcq', {
+      const response = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/generate-mcq`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

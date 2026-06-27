@@ -35,6 +35,7 @@ jobs:
         run: npx vite build
         env:
           GITHUB_ACTIONS: true
+          VITE_API_URL: ${{ secrets.VITE_API_URL }}
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

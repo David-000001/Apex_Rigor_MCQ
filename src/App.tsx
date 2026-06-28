@@ -123,6 +123,9 @@ export default function App() {
   const [loadingPhase, setLoadingPhase] = useState<string>('');
   const [customTitle, setCustomTitle] = useState<string>('');
   const [inputMode, setInputMode] = useState<'text' | 'file'>('text');
+  const [geminiApiKey, setGeminiApiKey] = useState<string>(
+    localStorage.getItem('gemini_api_key') || import.meta.env.VITE_GEMINI_API_KEY || ''
+  );
 
   // Interactive UI States
   const [hintUsed, setHintUsed] = useState<boolean>(false);
@@ -322,7 +325,12 @@ export default function App() {
         }
       }
 
-      const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY || '' });
+      // Save key to localStorage for persistence
+      if (geminiApiKey) localStorage.setItem('gemini_api_key', geminiApiKey);
+      if (!geminiApiKey) {
+        throw new Error('Please enter your Gemini API key in the field above.');
+      }
+      const ai = new GoogleGenAI({ apiKey: geminiApiKey });
 
       // Build prompt parts
       const parts: any[] = [];
@@ -912,6 +920,23 @@ Strict Quality Instructions:
                       </div>
                     </div>
 
+                    {/* API Key Input */}
+                    <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-3 space-y-1.5">
+                      <label className="text-[10px] uppercase tracking-wider text-zinc-500 font-medium flex items-center space-x-1.5">
+                        <span>🔑</span><span>Gemini API Key</span>
+                      </label>
+                      <input
+                        type="password"
+                        value={geminiApiKey}
+                        onChange={(e) => {
+                          setGeminiApiKey(e.target.value);
+                          localStorage.setItem('gemini_api_key', e.target.value);
+                        }}
+                        placeholder="Paste your Gemini API key here..."
+                        className="w-full bg-zinc-900 border border-zinc-800 rounded-lg py-1.5 px-2 text-xs text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-amber-500/30"
+                      />
+                      <p className="text-[9px] text-zinc-600">Get a free key at <a href="https://aistudio.google.com/apikey" target="_blank" className="text-amber-500 underline">aistudio.google.com/apikey</a>. Saved locally.</p>
+                    </div>
                     {/* Error display */}
                     {generationError && (
                       <div className="bg-red-500/10 border border-red-500/20 p-3 rounded-lg text-xs text-red-400 flex items-start space-x-2">

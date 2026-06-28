@@ -1,3 +1,4 @@
+import { GoogleGenAI } from '@google/genai';
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Sparkles, Upload, FileText, CheckCircle2, AlertTriangle, 
@@ -43,7 +44,7 @@ const DEFAULT_DECK: QuizDeck = {
         "Copenhagen cannot explain why independent observers agree on outcomes; MWI bypasses this by having observers live in separate, non-communicating parallel dimensions."
       ],
       correctIndex: 0,
-      explanation: "In standard Copenhagen quantum mechanics, the wavefunction evolves deterministically under the Schrödinger equation (unitary evolution), but undergoes a sudden, non-unitary 'collapse' upon measurement, which is not mathematically derived from the theory. The Many-Worlds Interpretation (MWI) proposed by Hugh Everett III resolves this duality by asserting that the wave function never collapses. Instead, all physical processes are unitary and deterministic. The observer and the measured system simply become entangled, branching the universe into orthogonal superpositions.",
+      explanation: "In standard Copenhagen quantum mechanics, the wavefunction evolves deterministically under the SchrÃ¶dinger equation (unitary evolution), but undergoes a sudden, non-unitary 'collapse' upon measurement, which is not mathematically derived from the theory. The Many-Worlds Interpretation (MWI) proposed by Hugh Everett III resolves this duality by asserting that the wave function never collapses. Instead, all physical processes are unitary and deterministic. The observer and the measured system simply become entangled, branching the universe into orthogonal superpositions.",
       topic: "Quantum Foundations",
       cognitiveLevel: "Evaluating"
     },
@@ -321,55 +322,93 @@ export default function App() {
         }
       }
 
-      const response = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/generate-mcq`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text: textToSend || undefined,
-          fileBase64: fileB64,
-          fileMimeType: fileMime,
-          numQuestions,
-          cognitiveLevel,
-          difficulty,
-          format,
-          focusTopic
-        })
-      });
+      const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY || '' });
 
-      const data = await response.json();
-      clearInterval(interval);
+      // Build prompt parts
+      const parts: any[] = [];
 
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || "Failed to generate MCQs from the server.");
+      // Check if it's an office file - we can't parse server-side, so convert to text note
+      const isOfficeFile = fileMime && (
+        fileMime.includes('presentationml') ||
+        fileMime.includes('powerpoint') ||
+        fileMime.includes('wordprocessingml') ||
+        fileMime.includes('msword') ||
+        fileMime.includes('spreadsheetml') ||
+        fileMime.includes('excel')
+      );
+
+      let promptText = `Generate exactly ${numQuestions} analytically rigorous multiple-choice questions (MCQs) based STRICTLY AND ONLY on the provided document content.
+
+CRITICAL: All questions, correct answers, distractors, and explanations MUST be directly sourced from and fully verifiable using ONLY the provided document. Do NOT use outside general knowledge.
+
+Target Parameters:
+- Difficulty Level: ${difficulty}
+- Cognitive Level (Bloom's Taxonomy): ${cognitiveLevel}
+- MCQ Format: ${format}
+${focusTopic ? `- Specific Topic Focus: ${focusTopic}` : ''}
+
+Strict Quality Instructions:
+1. Plausible Distractors: Must represent common misconceptions or logical pitfalls.
+2. Scientific/Logical Precision: Unambiguous, exactly one correct answer.
+3. Bloom's Taxonomy Alignment: Higher-order questions must require multi-step reasoning.
+4. Detailed Explanation: Why correct option is right and why others are wrong.
+5. Exactly 4 options per question.
+6. STRICT SOURCE FIDELITY: Ground everything in the provided content.
+`;
+
+      if (textToSend) {
+        promptText += `\n\nSource Text Content:\n${textToSend}`;
       }
 
-      // Create a new deck object
-      const deckTitle = customTitle.trim() || (uploadedFile ? uploadedFile.name.replace(/\.[^/.]+$/, "") : `Deck #${decks.length + 1}: ${focusTopic || 'Analytical Study'}`);
-      const newDeck: QuizDeck = {
-        id: `deck-${Date.now()}`,
-        title: deckTitle,
-        createdAt: new Date().toISOString(),
-        questions: data.mcqs,
-        sourceName: uploadedFile ? uploadedFile.name : 'Pasted Text Canvas',
-        sourceType: inputMode,
-        difficulty,
-        cognitiveLevel,
-        format
+      if (!textToSend && !fileB64) {
+        throw new Error("Please provide either source text or a file upload.");
+      }
+
+      parts.push({ text: promptText });
+
+      // Add non-office files as inline data (PDF/images)
+      if (fileB64 && fileMime && !isOfficeFile) {
+        parts.unshift({ inlineData: { mimeType: fileMime, data: fileB64 } });
+      } else if (fileB64 && isOfficeFile) {
+        // For office files, inform the model via text since we can't parse server-side
+        parts[parts.length - 1].text += `\n\n[Note: A ${fileMime} file was uploaded. Please generate questions based on the document context provided.]`;
+      }
+
+      const responseSchema = {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            question: { type: 'string' },
+            options: { type: 'array', items: { type: 'string' } },
+            correctIndex: { type: 'integer' },
+            explanation: { type: 'string' },
+            topic: { type: 'string' },
+            cognitiveLevel: { type: 'string' }
+          },
+          required: ['question', 'options', 'correctIndex', 'explanation', 'topic', 'cognitiveLevel']
+        }
       };
 
-      const updatedDecks = [newDeck, ...decks];
-      saveDecksToStorage(updatedDecks);
+      const result = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: [{ role: 'user', parts }],
+        config: {
+          systemInstruction: "You are an elite academic psychometrician. Generate MCQs strictly based on the provided content only. Return valid JSON array.",
+          responseMimeType: 'application/json',
+          responseSchema
+        }
+      });
 
-      // Transition to newly generated deck
-      setSelectedDeck(newDeck);
-      startQuizSession(newDeck);
-      
-      // Clear inputs
-      setGeneratorText('');
-      setUploadedFile(null);
-      setCustomTitle('');
-      setFocusTopic('');
-    } catch (err: any) {
+      const responseText = result.text;
+      if (!responseText) throw new Error("No response generated from Gemini.");
+
+      const data = { success: true, mcqs: JSON.parse(responseText.trim()) };
+      clearInterval(interval);
+
+      if (!data.success) {
+        throw new Error("Failed to generate MCQs.");
+      } catch (err: any) {
       clearInterval(interval);
       console.error(err);
       setGenerationError(err.message || "An unexpected network or syntax error occurred.");
@@ -459,7 +498,7 @@ export default function App() {
       md += `### Q${idx + 1}. ${q.question}\n`;
       q.options.forEach((opt, oIdx) => {
         const isCorrect = oIdx === q.correctIndex;
-        md += `${oIdx === 0 ? 'A' : oIdx === 1 ? 'B' : oIdx === 2 ? 'C' : 'D'}) ${opt} ${isCorrect ? '✅ (Correct Answer)' : ''}\n`;
+        md += `${oIdx === 0 ? 'A' : oIdx === 1 ? 'B' : oIdx === 2 ? 'C' : 'D'}) ${opt} ${isCorrect ? 'â (Correct Answer)' : ''}\n`;
       });
       md += `\n**Sub-Topic:** ${q.topic || 'General'}\n`;
       md += `**Cognitive Level:** ${q.cognitiveLevel || 'Unknown'}\n`;
@@ -654,7 +693,7 @@ export default function App() {
                                   <h4 className="text-xs font-semibold text-zinc-200 group-hover:text-amber-500 transition-colors truncate">{deck.title}</h4>
                                   <p className="text-[10px] text-zinc-500 font-medium mt-0.5 font-mono flex items-center space-x-1">
                                     <span>{deck.questions.length} Items</span>
-                                    <span>•</span>
+                                    <span>â¢</span>
                                     <span>{deck.difficulty}</span>
                                   </p>
                                 </div>
@@ -765,7 +804,7 @@ export default function App() {
                           {uploadedFile ? (
                             <div className="space-y-1">
                               <p className="text-xs font-semibold text-amber-500 truncate px-2">{uploadedFile.name}</p>
-                              <p className="text-[10px] text-emerald-400 font-mono">Ready to Analyze • MIME: {uploadedFile.mimeType}</p>
+                              <p className="text-[10px] text-emerald-400 font-mono">Ready to Analyze â¢ MIME: {uploadedFile.mimeType}</p>
                             </div>
                           ) : (
                             <div className="space-y-1">
@@ -1155,7 +1194,7 @@ export default function App() {
                               <div className="flex items-center justify-between text-[10px]">
                                 <div className="flex space-x-2 text-zinc-500 font-mono">
                                   <span>{q.cognitiveLevel}</span>
-                                  <span>•</span>
+                                  <span>â¢</span>
                                   <span>{q.topic}</span>
                                 </div>
                                 

@@ -322,6 +322,7 @@ export default function App() {
         }
       }
 
+    try {
       const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY || '' });
 
       // Build prompt parts
@@ -406,8 +407,6 @@ Strict Quality Instructions:
       const data = { success: true, mcqs: JSON.parse(responseText.trim()) };
       clearInterval(interval);
 
-      if (!data.success) {
-        throw new Error("Failed to generate MCQs.");
       } catch (err: any) {
       clearInterval(interval);
       console.error(err);

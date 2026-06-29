@@ -1,6 +1,0 @@
-{
-  "name": "Rigorous MCQ Generator",
-  "description": "A high-quality, analytically rigorous multiple choice question generator and interactive practice quiz app styled as a modern Android app in a matte dark theme.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}
